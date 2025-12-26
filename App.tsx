@@ -1,5 +1,5 @@
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { extractExif } from './services/exifService';
 import { analyzePhotoSubject, generateSticker } from './services/geminiService';
 import { resizeImage } from './services/imageUtils';
@@ -7,17 +7,68 @@ import { PhotoMetadata } from './types';
 import { JourneyMap } from './components/JourneyMap';
 import { Sticker } from './components/Sticker';
 
+const STORAGE_KEY = 'sticker_journey_photos';
+
 const App: React.FC = () => {
   const [photos, setPhotos] = useState<PhotoMetadata[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedPhoto, setSelectedPhoto] = useState<PhotoMetadata | null>(null);
   const [progress, setProgress] = useState(0);
   const [processingStep, setProcessingStep] = useState("");
+  const [isLoaded, setIsLoaded] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Helper to reconstruct Blob URLs from stored base64 data
+  const reconstructUrl = (base64: string, mimeType: string) => {
+    try {
+      const binary = atob(base64);
+      const array = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) array[i] = binary.charCodeAt(i);
+      const blob = new Blob([array], { type: mimeType });
+      return URL.createObjectURL(blob);
+    } catch (e) {
+      console.error("Failed to reconstruct URL", e);
+      return "";
+    }
+  };
+
+  // 1. Load data from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        const parsed: PhotoMetadata[] = JSON.parse(saved);
+        // Reconstruct blob URLs because they expire after page refresh
+        const hydrated = parsed.map(p => ({
+          ...p,
+          url: reconstructUrl(p.base64, p.mimeType)
+        }));
+        setPhotos(hydrated);
+      } catch (e) {
+        console.error("Failed to load saved photos:", e);
+      }
+    }
+    setIsLoaded(true);
+  }, []);
+
+  // 2. Save data to localStorage whenever photos change
+  useEffect(() => {
+    if (!isLoaded) return;
+    try {
+      // We don't need to save the 'url' property as it's a temporary blob URL
+      const toSave = photos.map(({ url, ...rest }) => rest);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+    } catch (e) {
+      if (e instanceof Error && e.name === 'QuotaExceededError') {
+        alert("本地存储空间不足，无法保存更多照片。建议清理一些旧的贴纸。");
+      }
+      console.error("Failed to save photos:", e);
+    }
+  }, [photos, isLoaded]);
+
   const processFiles = async (files: FileList) => {
-    if (files.length > 10) {
-      alert("最多上传10张照片哦");
+    if (photos.length + files.length > 10) {
+      alert("总计最多保存10张照片哦，当前已有 " + photos.length + " 张");
       return;
     }
 
@@ -35,10 +86,10 @@ const App: React.FC = () => {
         // 1. Extract EXIF (Original file for GPS)
         const { lat, lng, timestamp } = await extractExif(file);
         
-        // 2. Resize image for Gemini API to avoid Rpc/XHR errors
+        // 2. Resize image for Gemini API and storage optimization
         setProcessingStep(`正在优化图像大小...`);
         const { base64, mimeType } = await resizeImage(file);
-        const url = URL.createObjectURL(file);
+        const url = reconstructUrl(base64, mimeType);
 
         // 3. Analyze with Gemini
         setProcessingStep(`正在分析内容...`);
@@ -83,8 +134,12 @@ const App: React.FC = () => {
   };
 
   const clearPhotos = () => {
-    setPhotos([]);
-    setSelectedPhoto(null);
+    if (window.confirm("确定要清空所有贴纸和本地保存的数据吗？")) {
+      photos.forEach(p => URL.revokeObjectURL(p.url));
+      setPhotos([]);
+      setSelectedPhoto(null);
+      localStorage.removeItem(STORAGE_KEY);
+    }
   };
 
   return (
@@ -168,8 +223,9 @@ const App: React.FC = () => {
                 <button 
                   onClick={() => fileInputRef.current?.click()}
                   className="w-full py-4 border-2 border-dashed border-stone-100 rounded-2xl text-stone-300 hover:border-amber-200 hover:text-amber-500 transition-all text-sm font-handwriting hover:bg-amber-50"
+                  disabled={photos.length >= 10}
                 >
-                  添加新的时刻
+                  {photos.length >= 10 ? "贴纸已满" : "添加新的时刻"}
                 </button>
               </div>
             </div>
@@ -239,7 +295,11 @@ const App: React.FC = () => {
       />
       
       {/* Footer / Info */}
-      <footer className="fixed bottom-0 left-0 right-0 p-8 flex justify-center pointer-events-none z-[1500]">
+      <footer className="fixed bottom-0 left-0 right-0 p-8 flex flex-col items-center pointer-events-none z-[1500] space-y-2">
+        <div className="bg-white/80 backdrop-blur-md px-6 py-2 rounded-full border border-stone-100 shadow-lg text-[9px] text-stone-400 uppercase tracking-widest font-bold pointer-events-auto flex items-center gap-2">
+          <div className="w-1.5 h-1.5 bg-green-400 rounded-full"></div>
+          所有记录已自动保存至本地浏览器
+        </div>
         <div className="bg-white/80 backdrop-blur-md px-8 py-3 rounded-full border border-stone-100 shadow-xl text-[10px] text-stone-400 uppercase tracking-[0.3em] font-black pointer-events-auto hover:text-amber-500 transition-colors">
           Powered by Gemini 2.5 Flash Image • Nano Banana Series
         </div>

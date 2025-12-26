@@ -1,5 +1,5 @@
 
-export async function resizeImage(file: File, maxWidth: number = 1024, maxHeight: number = 1024): Promise<{ base64: string; mimeType: string }> {
+export async function resizeImage(file: File, maxWidth: number = 800, maxHeight: number = 800): Promise<{ base64: string; mimeType: string }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -30,8 +30,8 @@ export async function resizeImage(file: File, maxWidth: number = 1024, maxHeight
         }
         ctx.drawImage(img, 0, 0, width, height);
         
-        // Use image/jpeg for smaller payload size
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        // Use image/jpeg with 0.7 quality to keep base64 string size small for localStorage
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
         const base64 = dataUrl.split(',')[1];
         resolve({ base64, mimeType: 'image/jpeg' });
       };
