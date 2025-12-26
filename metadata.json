@@ -1,0 +1,7 @@
+{
+  "name": "Sticker Journey Map",
+  "description": "A beautiful journal-style map that turns your photo subjects into stickers and places them where they were captured.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
